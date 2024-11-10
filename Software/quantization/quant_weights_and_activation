@@ -1,0 +1,65 @@
+
+#ACTIVATION AND Wright Quantization
+# Deepcopy the model for quantization
+quantized_model = deepcopy(model)
+
+# Simulate quantization on the deepcopy (for evaluation)
+def apply_quantization_to_model(model, bits=4):
+    model.eval()  # Set to evaluation mode
+    
+    # Quantize the weights of the model
+    with torch.no_grad():  # No need to track gradients during quantization
+        # Quantize the weights of each layer
+        model.conv1.weight.data = UASquantize(model.conv1.weight.data, bits)
+        model.conv2.weight.data = UASquantize(model.conv2.weight.data, bits)
+        model.lin2.weight.data = UASquantize(model.lin2.weight.data, bits)
+    
+    # Apply quantization to activations after each layer
+    def quantized_forward(x):
+        x = model.conv1(x)
+        x = UASquantize(x, bits)  # Quantize activations after conv1
+        x = model.act1(x)
+        x = model.pool1(x)
+        
+        x = model.conv2(x)
+        x = UASquantize(x, bits)  # Quantize activations after conv2
+        x = model.act2(x)
+        x = model.pool2(x)
+        
+        x = x.view(x.size(0), -1)
+        x = model.lin2(x)
+        x = UASquantize(x, bits)  # Quantize activations after FC layer
+        return x
+
+    # Replace the model's forward pass with the quantized forward pass
+    model.forward = quantized_forward
+
+# Apply quantization to the copied model
+apply_quantization_to_model(quantized_model, bits=16)
+
+# Now you can evaluate both models
+# Example: Evaluate the original model and the quantized model on some test data
+def evaluate_model(model, test_loader):
+    model.eval()  # Set to evaluation mode
+    total_correct = 0
+    total_samples = 0
+
+    with torch.no_grad():
+        for images, labels in test_loader:
+            if cuda_available:
+              images = images.cuda()
+              labels = labels.cuda()
+            outputs = model(images)
+            _, predicted = torch.max(outputs, 1)
+            total_correct += (predicted == labels).sum().item()
+            total_samples += labels.size(0)
+    
+    accuracy = total_correct / total_samples * 100
+    return accuracy
+
+# Assuming `test_loader` is your DataLoader for test data
+original_accuracy = evaluate_model(model, test_loader)
+quantized_accuracy = evaluate_model(quantized_model, test_loader)
+
+print(f"Original Model Accuracy: {original_accuracy:.2f}%")
+print(f"Quantized Model Accuracy: {quantized_accuracy:.2f}%")
